@@ -162,8 +162,45 @@ async function waitFor(c, pred, timeout = 4000) {
   s = await waitFor(host, (s) => s.phase === 'armed' && s.gimmick);
   await waitFor(B, (st) => st.phase === 'armed' && st.gimmick);
   check('выпал двойной свайп с двумя направлениями', () => assert.ok(s.gimmick.type === 'swipe2' && s.gimmick.dirs.length === 2));
+  check('после использования снова «по вероятностям»', () => assert.strictEqual(s.nextGimmick, 'auto'));
   check('у телефона тот же прикол', () => assert.deepStrictEqual(B.state.gimmick, s.gimmick));
-  check('после использования снова «авто»', () => assert.strictEqual(s.nextGimmick, 'auto'));
+
+  // --- 7. капчи и вероятности
+  console.log('Сценарий 7: капчи и вероятности приколов');
+  // новый вопрос + (опционально) прикол + открыть кнопки; ждём именно свежее состояние
+  async function freshArm(next) {
+    const q = host.state.question;
+    host.send({ type: 'reset' });
+    if (next) host.send({ type: 'nextGimmick', value: next });
+    host.send({ type: 'arm' });
+    return waitFor(host, (s) => s.question > q && s.phase === 'armed');
+  }
+  async function setChances(ch) {
+    host.send({ type: 'config', gimmickChances: ch });
+    await waitFor(host, (s) => Object.keys(ch).every((k) => s.gimmickChances[k] === ch[k]));
+  }
+  s = await freshArm('sad');
+  check('«самый грустный»: 6 смайлов, правильный — самый грустный из них', () => {
+    const L = ['😀', '🙂', '😐', '😕', '🙁', '😟', '😔', '😞', '😢', '😭'];
+    const g = s.gimmick;
+    assert.strictEqual(g.type, 'sad');
+    assert.strictEqual(g.emojis.length, 6);
+    const best = Math.max(...g.emojis.map((e) => L.indexOf(e)));
+    assert.strictEqual(L.indexOf(g.emojis[g.answer]), best);
+  });
+  s = await freshArm('odd');
+  check('«найди лишний»: сетка 30×30, лишний отличается', () => assert.ok(s.gimmick.type === 'odd' && s.gimmick.n === 30 && s.gimmick.odd !== s.gimmick.base && s.gimmick.idx < 900));
+  await setChances({ bounce: 0, swipe: 0, swipe2: 0, sad: 0, odd: 0 });
+  let any = 0;
+  for (let i = 0; i < 10; i++) { s = await freshArm(); if (s.gimmick) any++; }
+  check('при нулевых вероятностях приколов нет', () => assert.strictEqual(any, 0));
+  s = await freshArm('any');
+  check('«любой прикол» срабатывает даже при нулевых вероятностях', () => assert.ok(s.gimmick));
+  await setChances({ bounce: 0, swipe: 1, swipe2: 0, sad: 0, odd: 0 });
+  s = await freshArm();
+  check('свайп со 100% выпадает всегда', () => assert.strictEqual(s.gimmick && s.gimmick.type, 'swipe'));
+  s = await freshArm('anyCaptcha');
+  check('«любая капча» даёт капчу', () => assert.ok(['sad', 'odd'].includes(s.gimmick.type)));
 
   [host, A, B, C].forEach((c) => c.close());
   app.close();

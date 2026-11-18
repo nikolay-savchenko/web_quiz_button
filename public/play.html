@@ -50,10 +50,23 @@
   #ball.wait { background: #444; color: #aaa; box-shadow: none; }
 
   /* свайпы */
-  .arrows { display: flex; gap: 18px; justify-content: center; font-size: 96px; line-height: 1; }
-  .arrows .done { opacity: .25; }
-  .arrows .next { text-shadow: 0 0 24px #fff; animation: nudge .7s infinite alternate; }
+  .arrow { font-size: 120px; line-height: 1; display: inline-block; text-shadow: 0 0 24px #fff; animation: pop .25s ease-out, nudge .7s .25s infinite alternate; }
+  .swipeWord { font-size: 30px; font-weight: 800; margin-top: 10px; }
+  .swipeWord .pre { display: block; font-size: 18px; font-weight: 500; opacity: .85; }
+  #swipeBar { position: absolute; left: 0; bottom: 0; height: 10px; background: #fff; width: 0; opacity: .8; }
   @keyframes nudge { from { transform: scale(1); } to { transform: scale(1.15); } }
+  @keyframes pop { from { transform: scale(.3); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+
+  /* капчи */
+  #buzz.captcha { background: #f2f2f2; color: #222; box-shadow: none; }
+  #buzz.captcha:active { transform: none; }
+  #cap { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; padding: 14px; gap: 10px; }
+  .capTitle { font-size: 22px; font-weight: 800; text-align: center; min-height: 28px; }
+  .capTitle.err { color: #c0392b; }
+  .sadGrid { flex: 1; width: 100%; display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .sadGrid button { border: 0; border-radius: 18px; background: #fff; box-shadow: 0 2px 8px #0002; font-size: 64px; }
+  .oddWrap { flex: 1; width: 100%; display: flex; align-items: center; justify-content: center; min-height: 0; }
+  #oddCv { background: #fff; border-radius: 6px; touch-action: none; }
 </style>
 </head>
 <body>
@@ -70,7 +83,7 @@
       <span id="ping"></span>
       <a href="#" id="change">сменить</a>
     </div>
-    <div id="buzz"><div id="buzzText">…</div><div id="ball" class="hidden">ЖМИ</div></div>
+    <div id="buzz"><div id="buzzText">…</div><div id="ball" class="hidden">ЖМИ</div><div id="cap" class="hidden"></div><div id="swipeBar"></div></div>
   </div>
 
 <script src="/sync.js"></script>
@@ -117,6 +130,7 @@
 
   const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   const ARROW = { up: '↑', down: '↓', left: '←', right: '→' };
+  const WORD = { up: 'ВВЕРХ', down: 'ВНИЗ', left: 'ВЛЕВО', right: 'ВПРАВО' };
   const roundKey = () => state.question + ':' + state.armAt;
 
   // Что сейчас показывать на кнопке. mode: go — можно жать, locked — нажатие = фальстарт, иначе нажатия игнорируются
@@ -145,6 +159,7 @@
       if (open && notMine) return { cls: 'lose', text: 'Кнопка<br>не у тебя 🙃' };
       if (g && g.type === 'bounce') return { cls: 'arena', text: '', ball: true, open, mode: open ? 'go' : 'locked' };
       if (open && g && (g.type === 'swipe' || g.type === 'swipe2')) return { cls: 'swipe', swipe: true, mode: 'go' };
+      if (open && g && (g.type === 'sad' || g.type === 'odd')) return { cls: 'captcha', captcha: true, mode: 'go' };
       if (open) return { cls: 'go', text: 'ЖМИ!', mode: 'go' };
       return { cls: '', text: 'Внимание…', mode: 'locked' };
     }
@@ -191,38 +206,112 @@
     }
     if (v.swipe) {
       if (swipe.key !== roundKey()) swipe = { key: roundKey(), stage: 0 };
-      swipe.tracking = true; swipe.x = e.clientX; swipe.y = e.clientY;
+      swipe.tracking = true; swipe.x = e.clientX; swipe.y = e.clientY; swipe.progress = 0;
       buzz.setPointerCapture(e.pointerId);
       return;
     }
+    if (v.captcha) return onCaptchaTap(e, est);
     if (v.mode === 'go') doPress(est);
     else if (v.mode === 'locked') conn.send({ type: 'early', est });
   });
 
+  function shake() { buzz.classList.remove('shake'); void buzz.offsetWidth; buzz.classList.add('shake'); }
+
+  // Свайп засчитывается, когда палец прошёл 50% экрана в нужную сторону.
+  // В двойном свайпе второе направление показывается только после первого.
+  const VEC = { up: [0, -1], down: [0, 1], left: [-1, 0], right: [1, 0] };
   buzz.addEventListener('pointermove', (e) => {
     if (!swipe.tracking) return;
     const v = view();
     if (!v.swipe) { swipe.tracking = false; return; }
+    const dirs = state.gimmick.dirs;
+    const need = dirs[swipe.stage];
     const dx = e.clientX - swipe.x, dy = e.clientY - swipe.y;
-    const TH = 60;
-    if (Math.hypot(dx, dy) < TH) return;
-    const dir = Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? 'right' : 'left') : (dy > 0 ? 'down' : 'up');
-    const need = state.gimmick.dirs;
-    swipe.x = e.clientX; swipe.y = e.clientY; // следующий отрезок считаем от текущей точки (можно одним движением «уголком»)
-    if (dir === need[swipe.stage]) {
+    const TH = (need === 'left' || need === 'right' ? buzz.clientWidth : buzz.clientHeight) * 0.5;
+    const proj = dx * VEC[need][0] + dy * VEC[need][1];
+    swipe.progress = Math.max(0, Math.min(1, proj / TH));
+    if (proj >= TH) {
       swipe.stage++;
-      vibrate(15);
-      if (swipe.stage >= need.length) { swipe.tracking = false; doPress(conn.serverNow()); return; }
-    } else if (swipe.stage === 0 || dir !== need[swipe.stage - 1]) {
-      swipe.stage = 0; // не туда — начинай заново
-      buzz.classList.remove('shake'); void buzz.offsetWidth; buzz.classList.add('shake');
+      swipe.progress = 0;
+      swipe.x = e.clientX; swipe.y = e.clientY; // следующий отрезок — от текущей точки
+      vibrate(20);
+      if (swipe.stage >= dirs.length) { swipe.tracking = false; doPress(conn.serverNow()); }
+      return;
     }
-    render();
+    // ушёл заметно не туда?
+    if (Math.hypot(dx, dy) > 100) {
+      const dom = Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? 'right' : 'left') : (dy > 0 ? 'down' : 'up');
+      if (dom === need) return;
+      if (swipe.stage > 0 && dom === dirs[swipe.stage - 1]) { swipe.x = e.clientX; swipe.y = e.clientY; return; } // «перелёт» после прошлого шага — прощаем
+      swipe.stage = 0; swipe.progress = 0;
+      swipe.x = e.clientX; swipe.y = e.clientY;
+      vibrate(120);
+      shake();
+    }
   });
-  const endTrack = () => (swipe.tracking = false);
+  const endTrack = () => { swipe.tracking = false; swipe.progress = 0; };
   buzz.addEventListener('pointerup', endTrack);
   buzz.addEventListener('pointercancel', endTrack);
   document.addEventListener('contextmenu', (e) => e.preventDefault());
+
+  // ---------- капчи ----------
+  let cap = { key: null, lockUntil: 0 };
+  const CAP_LOCK_MS = 1500; // штраф за неверный ответ в капче
+
+  function buildCaptcha() {
+    const g = state.gimmick;
+    const el = $('cap');
+    cap = { key: roundKey(), lockUntil: 0 };
+    if (g.type === 'sad') {
+      el.innerHTML = `<div class="capTitle" id="capTitle">Выбери самый грустный смайлик</div>
+        <div class="sadGrid">${g.emojis.map((em, i) => `<button data-i="${i}">${em}</button>`).join('')}</div>`;
+    } else {
+      el.innerHTML = `<div class="capTitle" id="capTitle">Найди лишний смайл</div><div class="oddWrap" id="oddWrap"><canvas id="oddCv"></canvas></div>`;
+      requestAnimationFrame(drawOdd);
+    }
+  }
+
+  function drawOdd() {
+    const g = state.gimmick;
+    const wrap = $('oddWrap'), cv = $('oddCv');
+    if (!wrap || !cv) return;
+    const size = Math.floor(Math.min(wrap.clientWidth, wrap.clientHeight));
+    const dpr = window.devicePixelRatio || 1;
+    cv.style.width = cv.style.height = size + 'px';
+    cv.width = cv.height = Math.round(size * dpr);
+    const ctx = cv.getContext('2d');
+    ctx.scale(dpr, dpr);
+    const cell = size / g.n;
+    ctx.font = `${Math.floor(cell * 0.92)}px "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    for (let i = 0; i < g.n * g.n; i++) {
+      const c = i % g.n, r = Math.floor(i / g.n);
+      ctx.fillText(i === g.idx ? g.odd : g.base, (c + 0.5) * cell, (r + 0.5) * cell + cell * 0.05);
+    }
+  }
+  window.addEventListener('resize', () => { if (state && state.gimmick && state.gimmick.type === 'odd' && cap.key === roundKey()) drawOdd(); });
+
+  function onCaptchaTap(e, est) {
+    if (performance.now() < cap.lockUntil) return;
+    const g = state.gimmick;
+    let ok = null;
+    if (g.type === 'sad') {
+      const b = e.target.closest('[data-i]');
+      if (!b) return;
+      ok = +b.dataset.i === g.answer;
+    } else {
+      const cv = $('oddCv');
+      if (e.target !== cv) return;
+      const r = cv.getBoundingClientRect();
+      const cell = r.width / g.n;
+      const cx = r.left + ((g.idx % g.n) + 0.5) * cell;
+      const cy = r.top + (Math.floor(g.idx / g.n) + 0.5) * cell;
+      ok = Math.hypot(e.clientX - cx, e.clientY - cy) <= Math.max(cell * 1.2, 18); // палец толще клетки — даём запас
+    }
+    if (ok) doPress(est);
+    else { cap.lockUntil = performance.now() + CAP_LOCK_MS; vibrate(200); shake(); }
+  }
 
   // ---------- отрисовка ----------
   let lastHtml = '';
@@ -247,11 +336,31 @@
     let html;
     if (v.swipe) {
       if (swipe.key !== roundKey()) swipe = { key: roundKey(), stage: 0 };
-      const dirs = state.gimmick.dirs;
-      html = `<div class="arrows">${dirs.map((d, i) => `<span class="${i < swipe.stage ? 'done' : i === swipe.stage ? 'next' : ''}">${ARROW[d]}</span>`).join('')}</div>`
-        + `<small>${dirs.length > 1 ? 'свайпни ' + dirs.map((d) => ARROW[d]).join(' потом ') : 'свайпни ' + ARROW[dirs[0]]}</small>`;
+      const d = state.gimmick.dirs[Math.min(swipe.stage, state.gimmick.dirs.length - 1)];
+      // data-stage меняется → innerHTML пересоздаётся → анимация «бац» на новом направлении
+      html = `<div data-stage="${swipe.stage}"><span class="arrow">${ARROW[d]}</span>`
+        + `<div class="swipeWord">${swipe.stage > 0 ? '<span class="pre">а теперь</span>' : ''}смахни ${WORD[d]}</div></div>`;
+    } else if (v.captcha) {
+      html = '';
     } else {
       html = (v.text || '') + (v.sub ? `<small>${v.sub}</small>` : '');
+    }
+    $('swipeBar').style.width = v.swipe ? (swipe.progress || 0) * 100 + '%' : '0';
+
+    const capEl = $('cap');
+    if (v.captcha) {
+      if (cap.key !== roundKey()) buildCaptcha();
+      capEl.classList.remove('hidden');
+      const left = cap.lockUntil - performance.now();
+      const title = $('capTitle');
+      const g = state.gimmick;
+      const base = g.type === 'sad' ? 'Выбери самый грустный смайлик' : 'Найди лишний смайл';
+      const txt = left > 0 ? `❌ Не то! Подожди ${Math.ceil(left / 1000)} с` : base;
+      if (title.textContent !== txt) { title.textContent = txt; title.classList.toggle('err', left > 0); }
+    } else if (!capEl.classList.contains('hidden')) {
+      capEl.classList.add('hidden');
+      capEl.innerHTML = '';
+      cap.key = null;
     }
     if (html !== lastHtml) { $('buzzText').innerHTML = html; lastHtml = html; }
     const keepShake = buzz.classList.contains('shake');

@@ -25,17 +25,38 @@ const GIMMICKS = {
   bounce: 'Бегающая кнопка',
   swipe: 'Свайп',
   swipe2: 'Двойной свайп',
+  sad: 'Капча: самый грустный',
+  odd: 'Капча: найди лишний',
 };
+// вероятность каждого прикола на одно открытие кнопок (по умолчанию)
+const DEFAULT_CHANCES = { bounce: 0.04, swipe: 0.04, swipe2: 0.03, sad: 0.03, odd: 0.02 };
 const DIRS = ['up', 'down', 'left', 'right'];
 const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
+const shuffle = (arr) => { const a = [...arr]; for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
+
+// от самого весёлого к самому грустному
+const SAD_LADDER = ['😀', '🙂', '😐', '😕', '🙁', '😟', '😔', '😞', '😢', '😭'];
+// пары «основной / лишний» для сетки 30×30
+const ODD_PAIRS = [['😃', '😄'], ['😀', '😁'], ['🙂', '🙃'], ['😐', '😑'], ['😊', '🙂'], ['😆', '😂'], ['😶', '😐'], ['😮', '😯']];
 
 function makeGimmick(type) {
   if (!GIMMICKS[type]) return null;
   const g = { type };
   if (type === 'swipe') g.dirs = [pick(DIRS)];
-  if (type === 'swipe2') {
-    const a = pick(DIRS);
-    g.dirs = [a, pick(a === 'up' || a === 'down' ? ['left', 'right'] : ['up', 'down'])];
+  if (type === 'swipe2') g.dirs = [pick(DIRS), pick(DIRS)]; // любая комбинация, в т.ч. «вправо, потом влево»
+  if (type === 'sad') {
+    // самый грустный — один из трёх самых грустных, остальные 5 — веселее него
+    const top = 7 + Math.floor(Math.random() * 3);
+    const others = shuffle(SAD_LADDER.slice(0, top)).slice(0, 5);
+    g.emojis = shuffle([SAD_LADDER[top], ...others]);
+    g.answer = g.emojis.indexOf(SAD_LADDER[top]);
+  }
+  if (type === 'odd') {
+    const pair = shuffle(pick(ODD_PAIRS));
+    g.n = 30;
+    g.base = pair[0];
+    g.odd = pair[1];
+    g.idx = Math.floor(Math.random() * g.n * g.n);
   }
   if (type === 'bounce') {
     // угол не слишком близко к осям, чтобы кнопка не ездила строго вдоль стенки
@@ -67,14 +88,15 @@ function createApp(opts = {}) {
     teams: ['Команда 1', 'Команда 2', 'Команда 3'].map((name, i) => ({ id: 't' + (i + 1), name, color: PALETTE[i], score: 0 })),
     cost: 100,
     penaltyMs: 2000,
-    gimmickChance: 0.1,                // вероятность прикола на раунд
-    gimmicks: Object.keys(GIMMICKS),   // какие приколы могут выпасть
+    gimmickChances: { ...DEFAULT_CHANCES }, // вероятность каждого прикола на открытие кнопок
   };
   try {
     if (opts.dataFile !== null && fs.existsSync(cfg.dataFile)) {
       saved = { ...saved, ...JSON.parse(fs.readFileSync(cfg.dataFile, 'utf8')) };
     }
   } catch (e) { log('не смог прочитать', cfg.dataFile, e.message); }
+  saved.gimmickChances = { ...DEFAULT_CHANCES, ...(saved.gimmickChances || {}) };
+  delete saved.gimmickChance; delete saved.gimmicks; // старый формат настроек
 
   let saveTimer = null;
   function persist() {
@@ -138,8 +160,7 @@ function createApp(opts = {}) {
       hostsOnline: [...clients].filter((c) => c.role === 'host').length,
       gimmick: round.gimmick,
       nextGimmick: round.nextGimmick,
-      gimmickChance: saved.gimmickChance,
-      gimmicksEnabled: saved.gimmicks,
+      gimmickChances: saved.gimmickChances,
       gimmickNames: GIMMICKS,
       oneMode: round.oneMode,
       holders: round.holders,
@@ -172,9 +193,20 @@ function createApp(opts = {}) {
   function rollGimmick() {
     let type = round.nextGimmick;
     round.nextGimmick = 'auto';
+    const entries = Object.keys(GIMMICKS).map((k) => [k, Math.max(0, +saved.gimmickChances[k] || 0)]);
+    const total = entries.reduce((s, [, p]) => s + p, 0);
     if (type === 'auto') {
-      const enabled = saved.gimmicks.filter((g) => GIMMICKS[g]);
-      type = enabled.length && Math.random() < saved.gimmickChance ? pick(enabled) : 'none';
+      // каждый прикол выпадает со своей вероятностью; если сумма > 100% — нормируем
+      let r = Math.random() * Math.max(1, total);
+      type = 'none';
+      for (const [k, p] of entries) { if (r < p) { type = k; break; } r -= p; }
+    } else if (type === 'any') {
+      // принудительно какой-нибудь прикол: по весам, а если все веса 0 — любой
+      const pool = total > 0 ? entries : entries.map(([k]) => [k, 1]);
+      let r = Math.random() * pool.reduce((s, [, p]) => s + p, 0);
+      for (const [k, p] of pool) { if (r < p) { type = k; break; } r -= p; }
+    } else if (type === 'anyCaptcha') {
+      type = pick(['sad', 'odd']);
     }
     return makeGimmick(type);
   }
@@ -308,7 +340,7 @@ function createApp(opts = {}) {
         break;
       case 'oneOff': round.oneMode = false; round.holders = {}; broadcast(); break;
       case 'nextGimmick':
-        if (m.value === 'auto' || m.value === 'none' || GIMMICKS[m.value]) { round.nextGimmick = m.value; broadcast(); }
+        if (['auto', 'none', 'any', 'anyCaptcha'].includes(m.value) || GIMMICKS[m.value]) { round.nextGimmick = m.value; broadcast(); }
         break;
       case 'resetScores': saved.teams.forEach((t) => (t.score = 0)); persist(); broadcast(); break;
       case 'config': {
@@ -323,8 +355,12 @@ function createApp(opts = {}) {
         }
         if (Number.isFinite(+m.cost)) saved.cost = Math.max(0, Math.round(+m.cost));
         if (Number.isFinite(+m.penaltyMs)) saved.penaltyMs = Math.max(0, Math.min(10000, Math.round(+m.penaltyMs)));
-        if (Number.isFinite(+m.gimmickChance)) saved.gimmickChance = Math.max(0, Math.min(1, +m.gimmickChance));
-        if (Array.isArray(m.gimmicks)) saved.gimmicks = m.gimmicks.filter((g) => GIMMICKS[g]);
+        if (m.gimmickChances && typeof m.gimmickChances === 'object') {
+          for (const k of Object.keys(GIMMICKS)) {
+            const p = +m.gimmickChances[k];
+            if (Number.isFinite(p)) saved.gimmickChances[k] = Math.max(0, Math.min(1, p));
+          }
+        }
         persist();
         resetRound(true);
         break;

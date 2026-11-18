@@ -58,9 +58,10 @@
   label.inline { display: inline-flex; align-items: center; font-size: 15px; margin: 0; }
   #btnOne.on { background: #8e44ad; }
   #gTag { background: #8e44ad; color: #fff; padding: 4px 10px; border-radius: 8px; font-size: 16px; }
-  .checks { display: flex; flex-direction: column; gap: 4px; }
-  .checks label { display: flex; gap: 8px; align-items: center; color: #ddd; font-size: 14px; margin: 0; }
-  .checks input { width: auto; }
+  .chances { display: flex; flex-direction: column; gap: 6px; }
+  .chances .ch { display: grid; grid-template-columns: 1fr 70px 16px; gap: 6px; align-items: center; font-size: 14px; color: #ddd; }
+  .chances input { padding: 4px 6px; text-align: right; }
+  .total { font-size: 13px; color: #888; margin-top: 6px; }
 </style>
 </head>
 <body>
@@ -108,10 +109,10 @@
             <select id="cfgPen"><option value="0">выкл</option><option value="1000">1 с</option><option value="2000">2 с</option><option value="3000">3 с</option><option value="5000">5 с</option></select>
           </div>
         </div>
-        <div><label>Вероятность прикола на открытие кнопок</label>
-          <select id="cfgChance"><option value="0">никогда</option><option value="0.1">10%</option><option value="0.2">20%</option><option value="0.3">30%</option><option value="0.5">50%</option><option value="1">всегда</option></select>
+        <div><label>Вероятность каждого прикола на одно открытие кнопок</label>
+          <div id="cfgGimmicks" class="chances"></div>
+          <div id="cfgTotal" class="total"></div>
         </div>
-        <div><label>Какие приколы могут выпасть</label><div id="cfgGimmicks" class="checks"></div></div>
         <button id="cfgSave">Сохранить</button>
         <button id="resetScores" style="background:#4a1f1f">Обнулить счёт</button>
       </div>
@@ -181,8 +182,7 @@
   $('cfgSave').onclick = () => {
     send('config', {
       teams: $('cfgTeams').value.split('\n'), cost: $('cfgCost').value, penaltyMs: $('cfgPen').value,
-      gimmickChance: $('cfgChance').value,
-      gimmicks: [...document.querySelectorAll('#cfgGimmicks input:checked')].map((i) => i.value),
+      gimmickChances: Object.fromEntries([...document.querySelectorAll('#cfgGimmicks input')].map((i) => [i.dataset.g, (+i.value || 0) / 100])),
     });
     cfgFilled = false;
   };
@@ -190,7 +190,13 @@
   $('btnOneOff').onclick = () => send('oneOff');
   $('nextG').onchange = () => send('nextGimmick', { value: $('nextG').value });
   const ARROW = { up: '↑', down: '↓', left: '←', right: '→' };
-  const gimmickLabel = (g, names) => names[g.type] + (g.dirs ? ' ' + g.dirs.map((d) => ARROW[d]).join(' ') : '');
+  const gimmickLabel = (g, names) => names[g.type] + (g.type === 'swipe' ? ' ' + ARROW[g.dirs[0]] : '');
+  // ответ — только во всплывающей подсказке (экран ведущего может быть на проекторе)
+  const gimmickSecret = (g) => g.type === 'swipe2' ? 'Направления: ' + g.dirs.map((d) => ARROW[d]).join(' потом ') : g.type === 'sad' ? `Ответ: ${g.emojis[g.answer]}` : g.type === 'odd' ? `Лишний ${g.odd} среди ${g.base}, клетка ${g.idx % g.n + 1}×${Math.floor(g.idx / g.n) + 1}` : '';
+  function updateTotal() {
+    const sum = [...document.querySelectorAll('#cfgGimmicks input')].reduce((s, i) => s + (+i.value || 0), 0);
+    $('cfgTotal').textContent = sum > 100 ? `итого ${sum}% — больше 100%, прикол будет всегда (доли пропорционально)` : `итого прикол примерно в ${sum}% открытий`;
+  }
   $('qrImg').onclick = () => $('qrFull').classList.remove('hidden');
   $('qrFull').onclick = () => $('qrFull').classList.add('hidden');
 
@@ -263,11 +269,12 @@
     const names = state.gimmickNames;
     const gTag = $('gTag');
     gTag.classList.toggle('hidden', !state.gimmick);
-    if (state.gimmick) gTag.textContent = '🎲 ' + gimmickLabel(state.gimmick, names);
+    if (state.gimmick) { gTag.textContent = '🎲 ' + gimmickLabel(state.gimmick, names); gTag.title = gimmickSecret(state.gimmick); }
     $('btnOne').classList.toggle('on', state.oneMode);
     $('btnOne').firstChild.textContent = state.oneMode ? '🎯 У одного: перевыбрать' : '🎯 Кнопка у одного';
     $('btnOneOff').classList.toggle('hidden', !state.oneMode);
-    const opts = [['auto', 'случайно (по вероятности)'], ['none', 'без прикола'], ...Object.entries(names)];
+    const opts = [['auto', 'по вероятностям'], ['none', 'без прикола'], ['any', '🎲 любой прикол (точно будет)'], ['anyCaptcha', '🧩 любая капча'],
+      ...Object.entries(names).map(([k, n]) => [k, '→ ' + n])];
     const optHtml = opts.map(([v, n]) => `<option value="${v}">${esc(n)}</option>`).join('');
     if ($('nextG').dataset.h !== optHtml) { $('nextG').innerHTML = optHtml; $('nextG').dataset.h = optHtml; }
     if (document.activeElement !== $('nextG')) $('nextG').value = state.nextGimmick;
@@ -276,9 +283,10 @@
       $('cfgTeams').value = state.teams.map((x) => x.name).join('\n');
       $('cfgCost').value = state.cost;
       $('cfgPen').value = String(state.penaltyMs);
-      $('cfgChance').value = String(state.gimmickChance);
-      $('cfgGimmicks').innerHTML = Object.entries(names).map(([v, n]) =>
-        `<label><input type="checkbox" value="${v}" ${state.gimmicksEnabled.includes(v) ? 'checked' : ''}>${esc(n)}</label>`).join('');
+      $('cfgGimmicks').innerHTML = Object.entries(names).map(([k, n]) =>
+        `<div class="ch"><span>${esc(n)}</span><input type="number" min="0" max="100" step="1" data-g="${k}" value="${Math.round((state.gimmickChances[k] || 0) * 1000) / 10}"><span>%</span></div>`).join('');
+      $('cfgGimmicks').querySelectorAll('input').forEach((i) => (i.oninput = updateTotal));
+      updateTotal();
       cfgFilled = true;
     }
   }

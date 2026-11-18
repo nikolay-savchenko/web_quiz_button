@@ -188,19 +188,25 @@ async function waitFor(c, pred, timeout = 4000) {
     const best = Math.max(...g.emojis.map((e) => L.indexOf(e)));
     assert.strictEqual(L.indexOf(g.emojis[g.answer]), best);
   });
-  s = await freshArm('odd');
-  check('«найди лишний»: сетка 30×30, лишний отличается', () => assert.ok(s.gimmick.type === 'odd' && s.gimmick.n === 30 && s.gimmick.odd !== s.gimmick.base && s.gimmick.idx < 900));
-  await setChances({ bounce: 0, swipe: 0, swipe2: 0, sad: 0, odd: 0 });
+  for (const [type, n] of [['odd5', 5], ['odd10', 10]]) {
+    s = await freshArm(type);
+    check(`«найди лишний» ${n}×${n}: пара 🙂/🙃 или 🐱/🐶`, () => {
+      const g = s.gimmick;
+      assert.ok(g.type === type && g.n === n && g.idx < n * n);
+      assert.ok([['🙂', '🙃'], ['🐱', '🐶']].some((p) => p.includes(g.base) && p.includes(g.odd) && g.base !== g.odd));
+    });
+  }
+  await setChances({ bounce: 0, swipe: 0, swipe2: 0, sad: 0, odd5: 0, odd10: 0 });
   let any = 0;
   for (let i = 0; i < 10; i++) { s = await freshArm(); if (s.gimmick) any++; }
   check('при нулевых вероятностях приколов нет', () => assert.strictEqual(any, 0));
   s = await freshArm('any');
   check('«любой прикол» срабатывает даже при нулевых вероятностях', () => assert.ok(s.gimmick));
-  await setChances({ bounce: 0, swipe: 1, swipe2: 0, sad: 0, odd: 0 });
+  await setChances({ bounce: 0, swipe: 1, swipe2: 0, sad: 0, odd5: 0, odd10: 0 });
   s = await freshArm();
   check('свайп со 100% выпадает всегда', () => assert.strictEqual(s.gimmick && s.gimmick.type, 'swipe'));
   s = await freshArm('anyCaptcha');
-  check('«любая капча» даёт капчу', () => assert.ok(['sad', 'odd'].includes(s.gimmick.type)));
+  check('«любая капча» даёт капчу', () => assert.ok(['sad', 'odd5', 'odd10'].includes(s.gimmick.type)));
 
   [host, A, B, C].forEach((c) => c.close());
   app.close();

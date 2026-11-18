@@ -192,7 +192,7 @@
   const ARROW = { up: '↑', down: '↓', left: '←', right: '→' };
   const gimmickLabel = (g, names) => names[g.type] + (g.type === 'swipe' ? ' ' + ARROW[g.dirs[0]] : '');
   // ответ — только во всплывающей подсказке (экран ведущего может быть на проекторе)
-  const gimmickSecret = (g) => g.type === 'swipe2' ? 'Направления: ' + g.dirs.map((d) => ARROW[d]).join(' потом ') : g.type === 'sad' ? `Ответ: ${g.emojis[g.answer]}` : g.type === 'odd' ? `Лишний ${g.odd} среди ${g.base}, клетка ${g.idx % g.n + 1}×${Math.floor(g.idx / g.n) + 1}` : '';
+  const gimmickSecret = (g) => g.type === 'swipe2' ? 'Направления: ' + g.dirs.map((d) => ARROW[d]).join(' потом ') : g.type === 'sad' ? `Ответ: ${g.emojis[g.answer]}` : g.n ? `Лишний ${g.odd} среди ${g.base}, клетка ${g.idx % g.n + 1}×${Math.floor(g.idx / g.n) + 1}` : '';
   function updateTotal() {
     const sum = [...document.querySelectorAll('#cfgGimmicks input')].reduce((s, i) => s + (+i.value || 0), 0);
     $('cfgTotal').textContent = sum > 100 ? `итого ${sum}% — больше 100%, прикол будет всегда (доли пропорционально)` : `итого прикол примерно в ${sum}% открытий`;

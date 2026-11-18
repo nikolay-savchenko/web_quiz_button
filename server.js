@@ -26,18 +26,19 @@ const GIMMICKS = {
   swipe: 'Свайп',
   swipe2: 'Двойной свайп',
   sad: 'Капча: самый грустный',
-  odd: 'Капча: найди лишний',
+  odd5: 'Капча: найди лишний 5×5',
+  odd10: 'Капча: найди лишний 10×10',
 };
 // вероятность каждого прикола на одно открытие кнопок (по умолчанию)
-const DEFAULT_CHANCES = { bounce: 0.04, swipe: 0.04, swipe2: 0.03, sad: 0.03, odd: 0.02 };
+const DEFAULT_CHANCES = { bounce: 0.04, swipe: 0.04, swipe2: 0.03, sad: 0.03, odd5: 0.02, odd10: 0.02 };
 const DIRS = ['up', 'down', 'left', 'right'];
 const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
 const shuffle = (arr) => { const a = [...arr]; for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
 
 // от самого весёлого к самому грустному
 const SAD_LADDER = ['😀', '🙂', '😐', '😕', '🙁', '😟', '😔', '😞', '😢', '😭'];
-// пары «основной / лишний» для сетки 30×30
-const ODD_PAIRS = [['😃', '😄'], ['😀', '😁'], ['🙂', '🙃'], ['😐', '😑'], ['😊', '🙂'], ['😆', '😂'], ['😶', '😐'], ['😮', '😯']];
+// пары «основной / лишний» для капчи «найди лишний»
+const ODD_PAIRS = [['🙂', '🙃'], ['🐱', '🐶']];
 
 function makeGimmick(type) {
   if (!GIMMICKS[type]) return null;
@@ -51,9 +52,9 @@ function makeGimmick(type) {
     g.emojis = shuffle([SAD_LADDER[top], ...others]);
     g.answer = g.emojis.indexOf(SAD_LADDER[top]);
   }
-  if (type === 'odd') {
+  if (type === 'odd5' || type === 'odd10') {
     const pair = shuffle(pick(ODD_PAIRS));
-    g.n = 30;
+    g.n = type === 'odd5' ? 5 : 10;
     g.base = pair[0];
     g.odd = pair[1];
     g.idx = Math.floor(Math.random() * g.n * g.n);
@@ -206,7 +207,7 @@ function createApp(opts = {}) {
       let r = Math.random() * pool.reduce((s, [, p]) => s + p, 0);
       for (const [k, p] of pool) { if (r < p) { type = k; break; } r -= p; }
     } else if (type === 'anyCaptcha') {
-      type = pick(['sad', 'odd']);
+      type = pick(['sad', 'odd5', 'odd10']);
     }
     return makeGimmick(type);
   }

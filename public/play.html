@@ -159,7 +159,7 @@
       if (open && notMine) return { cls: 'lose', text: 'Кнопка<br>не у тебя 🙃' };
       if (g && g.type === 'bounce') return { cls: 'arena', text: '', ball: true, open, mode: open ? 'go' : 'locked' };
       if (open && g && (g.type === 'swipe' || g.type === 'swipe2')) return { cls: 'swipe', swipe: true, mode: 'go' };
-      if (open && g && (g.type === 'sad' || g.type === 'odd')) return { cls: 'captcha', captcha: true, mode: 'go' };
+      if (open && g && (g.type === 'sad' || g.type === 'odd5' || g.type === 'odd10')) return { cls: 'captcha', captcha: true, mode: 'go' };
       if (open) return { cls: 'go', text: 'ЖМИ!', mode: 'go' };
       return { cls: '', text: 'Внимание…', mode: 'locked' };
     }
@@ -282,7 +282,7 @@
     const ctx = cv.getContext('2d');
     ctx.scale(dpr, dpr);
     const cell = size / g.n;
-    ctx.font = `${Math.floor(cell * 0.92)}px "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif`;
+    ctx.font = `${Math.floor(cell * 0.8)}px "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     for (let i = 0; i < g.n * g.n; i++) {
@@ -290,7 +290,7 @@
       ctx.fillText(i === g.idx ? g.odd : g.base, (c + 0.5) * cell, (r + 0.5) * cell + cell * 0.05);
     }
   }
-  window.addEventListener('resize', () => { if (state && state.gimmick && state.gimmick.type === 'odd' && cap.key === roundKey()) drawOdd(); });
+  window.addEventListener('resize', () => { if (state && state.gimmick && state.gimmick.type !== 'sad' && state.gimmick.type.startsWith('odd') && cap.key === roundKey()) drawOdd(); });
 
   function onCaptchaTap(e, est) {
     if (performance.now() < cap.lockUntil) return;
@@ -307,7 +307,7 @@
       const cell = r.width / g.n;
       const cx = r.left + ((g.idx % g.n) + 0.5) * cell;
       const cy = r.top + (Math.floor(g.idx / g.n) + 0.5) * cell;
-      ok = Math.hypot(e.clientX - cx, e.clientY - cy) <= Math.max(cell * 1.2, 18); // палец толще клетки — даём запас
+      ok = Math.hypot(e.clientX - cx, e.clientY - cy) <= Math.max(cell * 0.7, 18); // чуть больше половины клетки — с запасом на толщину пальца
     }
     if (ok) doPress(est);
     else { cap.lockUntil = performance.now() + CAP_LOCK_MS; vibrate(200); shake(); }

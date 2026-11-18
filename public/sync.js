@@ -54,6 +54,10 @@
       ws.onmessage = (e) => {
         const m = JSON.parse(e.data);
         if (m.type === 'pong') return addSample(m.t0, m.ts);
+        if (m.type === 'you' && m.build && window.BUILD && m.build !== window.BUILD) {
+          location.reload(); // сервер обновился — подтягиваем свежую страницу
+          return;
+        }
         onMessage(m);
       };
       ws.onclose = () => {

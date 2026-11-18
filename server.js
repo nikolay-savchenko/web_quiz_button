@@ -18,6 +18,11 @@ const { performance } = require('perf_hooks');
 const { WebSocketServer } = require('ws');
 const QRCode = require('qrcode');
 
+// версия клиентского кода: если страница на телефоне старее сервера — она сама перезагрузится
+const BUILD = crypto.createHash('sha1')
+  .update(['play.html', 'host.html', 'sync.js'].map((f) => fs.readFileSync(path.join(__dirname, 'public', f))).join(''))
+  .digest('hex').slice(0, 10);
+
 const PALETTE = ['#e74c3c', '#3498db', '#2ecc71', '#f39c12', '#9b59b6', '#1abc9c', '#e84393', '#7f8c8d'];
 
 // Приколы раунда. Выпадают всем командам одинаково (параметры генерирует сервер).
@@ -396,6 +401,7 @@ function createApp(opts = {}) {
     if (!entry) { res.writeHead(404); return res.end('not found'); }
     fs.readFile(path.join(__dirname, 'public', entry[0]), (err, buf) => {
       if (err) { res.writeHead(500); return res.end('error'); }
+      buf = buf.toString().replaceAll('__BUILD__', BUILD);
       res.writeHead(200, { 'Content-Type': entry[1], 'Cache-Control': 'no-cache' });
       res.end(buf);
     });
@@ -407,7 +413,7 @@ function createApp(opts = {}) {
     ws.isAlive = true;
     ws.id = crypto.randomBytes(4).toString('hex');
     clients.add(ws);
-    sendTo(ws, { type: 'you', id: ws.id });
+    sendTo(ws, { type: 'you', id: ws.id, build: BUILD });
     ws.on('pong', () => (ws.isAlive = true));
     ws.on('message', (raw) => {
       let m;

@@ -86,7 +86,8 @@
     <div id="buzz"><div id="buzzText">…</div><div id="ball" class="hidden">ЖМИ</div><div id="cap" class="hidden"></div><div id="swipeBar"></div></div>
   </div>
 
-<script src="/sync.js"></script>
+<script>window.BUILD = "__BUILD__";</script>
+<script src="/sync.js?v=__BUILD__"></script>
 <script>
   const $ = (id) => document.getElementById(id);
   let state = null;

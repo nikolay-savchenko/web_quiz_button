@@ -57,6 +57,7 @@
   #fun select { width: auto; margin-left: 8px; }
   label.inline { display: inline-flex; align-items: center; font-size: 15px; margin: 0; }
   #btnOne.on { background: #8e44ad; }
+  .hint { font-size: 13px; color: #f1c40f; }
   #gTag { background: #8e44ad; color: #fff; padding: 4px 10px; border-radius: 8px; font-size: 16px; }
   .chances { display: flex; flex-direction: column; gap: 6px; }
   .chances .ch { display: grid; grid-template-columns: 1fr 70px 16px; gap: 6px; align-items: center; font-size: 14px; color: #ddd; }
@@ -87,6 +88,7 @@
       <label class="inline">Прикол на следующее открытие:
         <select id="nextG"></select>
       </label>
+      <span id="nextHint" class="hint"></span>
     </div>
   </div>
 
@@ -122,7 +124,8 @@
 <button id="sound">🔇 Включить звук</button>
 <div id="qrFull" class="hidden"><img src="/qr.svg" alt="QR"><div>Сканируйте, чтобы подключиться</div></div>
 
-<script src="/sync.js"></script>
+<script>window.BUILD = "__BUILD__";</script>
+<script src="/sync.js?v=__BUILD__"></script>
 <script>
   const $ = (id) => document.getElementById(id);
   const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -188,7 +191,7 @@
   };
   $('btnOne').onclick = () => send('oneHolder');
   $('btnOneOff').onclick = () => send('oneOff');
-  $('nextG').onchange = () => send('nextGimmick', { value: $('nextG').value });
+  $('nextG').onchange = () => { send('nextGimmick', { value: $('nextG').value }); $('nextG').blur(); };
   const ARROW = { up: '↑', down: '↓', left: '←', right: '→' };
   const gimmickLabel = (g, names) => names[g.type] + (g.type === 'swipe' ? ' ' + ARROW[g.dirs[0]] : '');
   // ответ — только во всплывающей подсказке (экран ведущего может быть на проекторе)
@@ -278,6 +281,8 @@
     const optHtml = opts.map(([v, n]) => `<option value="${v}">${esc(n)}</option>`).join('');
     if ($('nextG').dataset.h !== optHtml) { $('nextG').innerHTML = optHtml; $('nextG').dataset.h = optHtml; }
     if (document.activeElement !== $('nextG')) $('nextG').value = state.nextGimmick;
+    $('nextHint').textContent = state.nextGimmick !== 'auto'
+      ? (state.phase === 'idle' ? '← включится при «Открыть кнопки»' : '← включится при следующем открытии (сейчас раунд уже идёт)') : '';
 
     if (!cfgFilled) {
       $('cfgTeams').value = state.teams.map((x) => x.name).join('\n');

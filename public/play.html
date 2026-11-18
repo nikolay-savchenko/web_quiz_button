@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#111">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>Кнопка</title>
+<style>
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; height: 100%; background: #111; color: #fff; font-family: -apple-system, system-ui, "Segoe UI", Roboto, sans-serif; overscroll-behavior: none; }
+  body { display: flex; flex-direction: column; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; touch-action: manipulation; }
+  .hidden { display: none !important; }
+
+  #picker { flex: 1; display: flex; flex-direction: column; justify-content: center; padding: 24px; gap: 14px; }
+  #picker h1 { font-size: 26px; margin: 0 0 10px; text-align: center; }
+  .team-btn { border: 0; border-radius: 16px; padding: 22px; font-size: 22px; font-weight: 700; color: #fff; }
+
+  #game { flex: 1; display: flex; flex-direction: column; }
+  #bar { display: flex; align-items: center; gap: 10px; padding: 10px 14px; padding-top: max(10px, env(safe-area-inset-top)); font-size: 15px; background: #000; }
+  #bar .name { font-weight: 700; flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #bar .score { font-variant-numeric: tabular-nums; font-weight: 700; }
+  #bar a { color: #888; text-decoration: none; font-size: 13px; }
+  #net { width: 10px; height: 10px; border-radius: 50%; background: #c0392b; flex: none; }
+  #net.ok { background: #2ecc71; } #net.slow { background: #f1c40f; }
+
+  #buzz { flex: 1; margin: 14px; margin-bottom: max(14px, env(safe-area-inset-bottom)); border-radius: 28px; display: flex; flex-direction: column;
+          align-items: center; justify-content: center; text-align: center; font-weight: 800; font-size: 44px; line-height: 1.1; padding: 20px;
+          background: #333; color: #aaa; transition: background .08s, transform .05s; }
+  #buzz small { display: block; font-size: 18px; font-weight: 500; margin-top: 12px; opacity: .85; }
+  #buzz.go { background: #27ae60; color: #fff; box-shadow: 0 0 60px #27ae6088; }
+  #buzz.go:active { transform: scale(.98); }
+  #buzz.pressed { background: #f1c40f; color: #222; }
+  #buzz.win { color: #fff; animation: pulse .8s infinite alternate; }
+  #buzz.penalty { background: #8e1b10; color: #fff; }
+  #buzz.lose { background: #2a2a2a; color: #777; }
+  @keyframes pulse { from { filter: brightness(1); } to { filter: brightness(1.35); } }
+  #ping { color: #666; font-size: 12px; font-variant-numeric: tabular-nums; }
+</style>
+</head>
+<body>
+  <div id="picker">
+    <h1>Выберите команду</h1>
+    <div id="teamList" style="display:flex;flex-direction:column;gap:14px"></div>
+  </div>
+
+  <div id="game" class="hidden">
+    <div id="bar">
+      <span id="net"></span>
+      <span class="name" id="teamName"></span>
+      <span class="score" id="teamScore"></span>
+      <span id="ping"></span>
+      <a href="#" id="change">сменить</a>
+    </div>
+    <div id="buzz">…</div>
+  </div>
+
+<script src="/sync.js"></script>
+<script>
+  const $ = (id) => document.getElementById(id);
+  let state = null;
+  let myTeam = localStorage.getItem('quiz.team') || null;
+  let localPressQ = null; // вопрос+armAt, на котором уже нажали (чтобы сразу показать жёлтый)
+  let wakeLock = null;
+
+  const conn = QuizSync.createConnection({
+    onOpen: () => conn.send({ type: 'hello', role: 'player', teamId: myTeam }),
+    onMessage: (m) => {
+      if (m.type === 'state') {
+        state = m;
+        if (myTeam && !state.teams.find((t) => t.id === myTeam)) { myTeam = null; localStorage.removeItem('quiz.team'); }
+        render();
+      } else if (m.type === 'event') {
+        if (m.name === 'winner' && m.teamId === myTeam) vibrate([80, 60, 200]);
+        if (m.name === 'falseStart' && m.teamId === myTeam) vibrate([300]);
+      }
+    },
+    onStatus: () => renderNet(),
+  });
+
+  function vibrate(p) { try { navigator.vibrate && navigator.vibrate(p); } catch (e) {} }
+
+  async function keepAwake() {
+    try { if ('wakeLock' in navigator && !wakeLock) { wakeLock = await navigator.wakeLock.request('screen'); wakeLock.addEventListener('release', () => (wakeLock = null)); } } catch (e) {}
+  }
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') keepAwake(); });
+
+  function pickTeam(id) {
+    myTeam = id;
+    localStorage.setItem('quiz.team', id);
+    conn.send({ type: 'join', teamId: id });
+    keepAwake();
+    render();
+  }
+  $('change').onclick = (e) => { e.preventDefault(); myTeam = null; localStorage.removeItem('quiz.team'); conn.send({ type: 'join', teamId: null }); render(); };
+
+  // Текущее состояние кнопки для моей команды
+  function view() {
+    if (!state || !myTeam) return { cls: '', text: 'Подключение…' };
+    const t = conn.serverNow();
+    const team = (id) => state.teams.find((x) => x.id === id);
+    const pen = state.penalties[myTeam];
+    const roundKey = state.question + ':' + state.armAt;
+    const iPressed = state.presses.some((p) => p.teamId === myTeam) || localPressQ === roundKey;
+
+    if (state.excluded.includes(myTeam)) {
+      if (state.phase === 'answering' && state.winner) return { cls: 'lose', text: 'Отвечает<br>' + esc(team(state.winner).name), sub: 'вы уже отвечали' };
+      return { cls: 'lose', text: 'Вы уже отвечали', sub: 'ждём следующий вопрос' };
+    }
+    if (pen && pen > t) return { cls: 'penalty', text: 'Фальстарт', sub: 'блок ещё ' + Math.ceil((pen - t) / 1000) + ' с', mode: 'locked' };
+    if (state.phase === 'answering') {
+      if (state.winner === myTeam) return { cls: 'win', text: 'ВЫ<br>ОТВЕЧАЕТЕ!', bg: team(myTeam).color };
+      return { cls: 'lose', text: 'Отвечает<br>' + esc(team(state.winner).name) };
+    }
+    // judging для не нажавших выглядит как armed: их нажатие ещё может оказаться первым
+    if (state.phase === 'armed' || state.phase === 'judging') {
+      if (iPressed) return { cls: 'pressed', text: 'Нажато!', sub: state.phase === 'judging' ? 'определяем первого…' : '' };
+      if (t >= state.armAt) return { cls: 'go', text: 'ЖМИ!', mode: 'go' };
+      return { cls: '', text: 'Внимание…', mode: 'locked' };
+    }
+    return { cls: '', text: 'Ждём<br>вопрос', sub: state.penaltyMs ? 'не жмите раньше времени — фальстарт' : '', mode: 'locked' };
+  }
+
+  function esc(s) { return String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
+
+  // Нажатие: время фиксируем в самом начале обработчика
+  $('buzz').addEventListener('pointerdown', (e) => {
+    const est = conn.serverNow();
+    e.preventDefault();
+    keepAwake();
+    const v = view();
+    if (v.mode === 'go') {
+      conn.send({ type: 'press', est, rtt: conn.rtt });
+      localPressQ = state.question + ':' + state.armAt;
+      vibrate(40);
+      render();
+    } else if (v.mode === 'locked') {
+      conn.send({ type: 'early', est });
+    }
+  });
+  document.addEventListener('contextmenu', (e) => e.preventDefault());
+
+  let lastHtml = '';
+  function render() {
+    if (!state) return;
+    $('picker').classList.toggle('hidden', !!myTeam);
+    $('game').classList.toggle('hidden', !myTeam);
+    if (!myTeam) {
+      const html = state.teams.map((t) => `<button class="team-btn" style="background:${t.color}" data-id="${t.id}">${esc(t.name)}</button>`).join('');
+      if ($('teamList').innerHTML !== html) {
+        $('teamList').innerHTML = html;
+        $('teamList').querySelectorAll('button').forEach((b) => (b.onclick = () => pickTeam(b.dataset.id)));
+      }
+      return;
+    }
+    const me = state.teams.find((t) => t.id === myTeam);
+    $('teamName').textContent = me.name;
+    $('teamName').style.color = me.color;
+    $('teamScore').textContent = me.score;
+    const v = view();
+    const html = v.text + (v.sub ? `<small>${v.sub}</small>` : '');
+    const b = $('buzz');
+    if (html !== lastHtml) { b.innerHTML = html; lastHtml = html; }
+    b.className = v.cls;
+    b.style.background = v.bg || '';
+  }
+
+  function renderNet() {
+    const n = $('net');
+    n.className = conn.online ? (conn.rtt != null && conn.rtt > 250 ? 'slow' : 'ok') : '';
+    $('ping').textContent = conn.online && conn.lastRtt != null ? Math.round(conn.lastRtt) + ' мс' : '';
+  }
+
+  // перерисовка для таймеров (открытие кнопки в armAt, отсчёт штрафа)
+  setInterval(render, 30);
+  setInterval(renderNet, 1000);
+</script>
+</body>
+</html>

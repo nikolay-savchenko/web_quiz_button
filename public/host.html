@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Квиз — ведущий</title>
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: #0e0f13; color: #eee; font-family: -apple-system, system-ui, "Segoe UI", Roboto, sans-serif; }
+  .hidden { display: none !important; }
+  button { font: inherit; cursor: pointer; border: 0; border-radius: 10px; padding: 10px 16px; background: #2a2d36; color: #eee; }
+  button:hover { filter: brightness(1.2); }
+  kbd { font-size: 11px; opacity: .6; border: 1px solid #fff5; border-radius: 4px; padding: 0 4px; margin-left: 6px; }
+
+  #auth { height: 100%; display: flex; align-items: center; justify-content: center; gap: 10px; }
+  #auth input { font-size: 18px; padding: 10px; border-radius: 8px; border: 1px solid #444; background: #1b1d24; color: #eee; }
+
+  #app { display: grid; grid-template-columns: 1fr 380px; height: 100vh; }
+  #stage { display: flex; flex-direction: column; padding: 28px; gap: 20px; min-width: 0; }
+  #status { font-size: 20px; color: #999; display: flex; gap: 14px; align-items: center; }
+  #status .q { color: #666; }
+  #big { flex: 1; border-radius: 28px; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center;
+         background: #1b1d24; font-size: clamp(40px, 8vw, 120px); font-weight: 800; transition: background .15s; padding: 20px; overflow: hidden; }
+  #big small { font-size: clamp(16px, 2vw, 28px); font-weight: 500; opacity: .8; margin-top: 10px; }
+  #big.armed { background: #133d24; color: #2ecc71; }
+  #big.judging { background: #3d3613; color: #f1c40f; }
+  #order { display: flex; gap: 12px; flex-wrap: wrap; min-height: 54px; }
+  .chip { padding: 12px 18px; border-radius: 12px; font-size: 20px; font-weight: 700; background: #1b1d24; border-left: 8px solid; }
+  .chip span { font-weight: 400; opacity: .7; font-size: 16px; margin-left: 8px; font-variant-numeric: tabular-nums; }
+  .chip.late { opacity: .5; }
+  #controls { display: flex; gap: 10px; flex-wrap: wrap; }
+  #controls button { font-size: 18px; padding: 14px 20px; }
+  #btnArm { background: #27ae60; } #btnCorrect { background: #2471a3; } #btnWrong { background: #a93226; }
+
+  #side { background: #15171d; padding: 20px; display: flex; flex-direction: column; gap: 16px; overflow-y: auto; }
+  h3 { margin: 0; font-size: 14px; text-transform: uppercase; letter-spacing: .08em; color: #777; }
+  .team { display: grid; grid-template-columns: 8px 1fr auto; gap: 10px; align-items: center; background: #1b1d24; border-radius: 12px; padding: 12px; }
+  .team .sw { width: 8px; height: 42px; border-radius: 4px; }
+  .team .nm { font-weight: 700; font-size: 18px; }
+  .team .meta { font-size: 12px; color: #888; }
+  .team .sc { font-size: 28px; font-weight: 800; font-variant-numeric: tabular-nums; text-align: right; }
+  .team .adj { grid-column: 2 / 4; display: flex; gap: 6px; }
+  .team .adj button { padding: 4px 10px; font-size: 13px; }
+  .team.excluded { opacity: .45; }
+  .pen { color: #e74c3c; font-weight: 700; }
+  #qrBox { text-align: center; }
+  #qrBox img { width: 100%; max-width: 260px; background: #fff; border-radius: 12px; padding: 8px; }
+  #qrBox .url { font-size: 13px; color: #8ab4f8; word-break: break-all; }
+  #qrFull { position: fixed; inset: 0; background: #000e; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 20px; z-index: 10; font-size: 32px; }
+  #qrFull img { width: min(70vh, 80vw); background: #fff; border-radius: 20px; padding: 16px; }
+  label { font-size: 13px; color: #999; display: block; margin-bottom: 4px; }
+  textarea, input, select { width: 100%; font: inherit; padding: 8px; border-radius: 8px; border: 1px solid #333; background: #0e0f13; color: #eee; }
+  .row { display: flex; gap: 10px; } .row > * { flex: 1; }
+  details summary { cursor: pointer; color: #999; }
+  #sound { position: fixed; top: 12px; right: 400px; }
+</style>
+</head>
+<body>
+<div id="auth" class="hidden">
+  <input id="keyInput" placeholder="Ключ ведущего" autofocus>
+  <button id="keyBtn">Войти</button>
+</div>
+
+<div id="app" class="hidden">
+  <div id="stage">
+    <div id="status"><span id="phaseTxt"></span><span class="q" id="qTxt"></span></div>
+    <div id="big">—</div>
+    <div id="order"></div>
+    <div id="controls">
+      <button id="btnArm">Открыть кнопки<kbd>Пробел</kbd></button>
+      <button id="btnCorrect">Верно<kbd>Enter</kbd></button>
+      <button id="btnWrong">Неверно<kbd>Backspace</kbd></button>
+      <button id="btnReset">Новый вопрос / сброс<kbd>Esc</kbd></button>
+    </div>
+  </div>
+
+  <div id="side">
+    <h3>Команды</h3>
+    <div id="teams" style="display:flex;flex-direction:column;gap:10px"></div>
+
+    <div id="qrBox">
+      <img src="/qr.svg" alt="QR" id="qrImg" title="Нажми, чтобы показать крупно">
+      <div class="url" id="playUrl"></div>
+    </div>
+
+    <details>
+      <summary>Настройки</summary>
+      <div style="display:flex;flex-direction:column;gap:10px;margin-top:10px">
+        <div><label>Команды (по одной на строку)</label><textarea id="cfgTeams" rows="4"></textarea></div>
+        <div class="row">
+          <div><label>Цена вопроса</label><input id="cfgCost" type="number" step="10"></div>
+          <div><label>Штраф за фальстарт</label>
+            <select id="cfgPen"><option value="0">выкл</option><option value="1000">1 с</option><option value="2000">2 с</option><option value="3000">3 с</option><option value="5000">5 с</option></select>
+          </div>
+        </div>
+        <button id="cfgSave">Сохранить</button>
+        <button id="resetScores" style="background:#4a1f1f">Обнулить счёт</button>
+      </div>
+    </details>
+  </div>
+</div>
+<button id="sound">🔇 Включить звук</button>
+<div id="qrFull" class="hidden"><img src="/qr.svg" alt="QR"><div>Сканируйте, чтобы подключиться</div></div>
+
+<script src="/sync.js"></script>
+<script>
+  const $ = (id) => document.getElementById(id);
+  const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const params = new URLSearchParams(location.search);
+  let key = params.get('key') || localStorage.getItem('quiz.hostKey') || '';
+  let state = null;
+  let cfgFilled = false;
+
+  // ---------- звук (WebAudio, без файлов) ----------
+  let ac = null;
+  $('sound').onclick = () => {
+    ac = ac || new (window.AudioContext || window.webkitAudioContext)();
+    ac.resume();
+    $('sound').textContent = '🔊 Звук включён';
+    beep(880, 0.08);
+  };
+  function beep(freq, dur, type = 'sine', vol = 0.25, delay = 0) {
+    if (!ac) return;
+    const o = ac.createOscillator(), g = ac.createGain();
+    o.type = type; o.frequency.value = freq;
+    const t = ac.currentTime + delay;
+    g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.001, t + dur);
+    o.connect(g).connect(ac.destination); o.start(t); o.stop(t + dur);
+  }
+  const sounds = {
+    armed: () => beep(660, 0.12),
+    winner: () => { beep(523, 0.15, 'square', 0.15); beep(784, 0.35, 'square', 0.15, 0.13); },
+    falseStart: () => beep(140, 0.5, 'sawtooth', 0.2),
+  };
+
+  // ---------- соединение ----------
+  const conn = QuizSync.createConnection({
+    onOpen: () => conn.send({ type: 'hello', role: 'host', key }),
+    onMessage: (m) => {
+      if (m.type === 'auth') {
+        if (m.ok) { localStorage.setItem('quiz.hostKey', key); $('auth').classList.add('hidden'); $('app').classList.remove('hidden'); }
+        else { $('auth').classList.remove('hidden'); $('app').classList.add('hidden'); }
+      } else if (m.type === 'state') {
+        const prev = state;
+        state = m;
+        if (prev && prev.phase !== 'armed' && m.phase === 'armed') setTimeout(sounds.armed, Math.max(0, m.armAt - conn.serverNow()));
+        render();
+      } else if (m.type === 'event') {
+        sounds[m.name] && sounds[m.name]();
+      }
+    },
+  });
+  $('keyBtn').onclick = () => { key = $('keyInput').value.trim(); conn.send({ type: 'hello', role: 'host', key }); };
+  $('keyInput').onkeydown = (e) => { if (e.key === 'Enter') $('keyBtn').click(); };
+
+  const send = (type, extra = {}) => conn.send({ type, ...extra });
+  $('btnArm').onclick = () => send('arm');
+  $('btnCorrect').onclick = () => send('correct');
+  $('btnWrong').onclick = () => send('wrong');
+  $('btnReset').onclick = () => send('reset');
+  $('resetScores').onclick = () => { if (confirm('Обнулить счёт всех команд?')) send('resetScores'); };
+  $('cfgSave').onclick = () => {
+    send('config', { teams: $('cfgTeams').value.split('\n'), cost: $('cfgCost').value, penaltyMs: $('cfgPen').value });
+    cfgFilled = false;
+  };
+  $('qrImg').onclick = () => $('qrFull').classList.remove('hidden');
+  $('qrFull').onclick = () => $('qrFull').classList.add('hidden');
+
+  document.addEventListener('keydown', (e) => {
+    if (['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName)) return;
+    if (e.code === 'Space') { e.preventDefault(); send('arm'); }
+    else if (e.key === 'Enter') { e.preventDefault(); send('correct'); }
+    else if (e.key === 'Backspace') { e.preventDefault(); send('wrong'); }
+    else if (e.key === 'Escape') { $('qrFull').classList.add('hidden'); send('reset'); }
+    else if (e.key === 'q' || e.key === 'й') $('qrFull').classList.toggle('hidden');
+  });
+
+  // ---------- отрисовка ----------
+  function render() {
+    if (!state) return;
+    const team = (id) => state.teams.find((t) => t.id === id) || { name: '?', color: '#555' };
+    const t = conn.serverNow();
+    const phaseNames = { idle: 'Кнопки закрыты', armed: 'Кнопки открыты', judging: 'Определяем первого…', answering: 'Ответ' };
+    $('phaseTxt').textContent = phaseNames[state.phase];
+    $('qTxt').textContent = `вопрос #${state.question} · цена ${state.cost}`;
+
+    const big = $('big');
+    big.className = '';
+    big.style.background = '';
+    if (state.phase === 'answering' && state.winner) {
+      const w = team(state.winner);
+      const p = state.presses[0];
+      big.style.background = w.color;
+      big.style.color = '#fff';
+      big.innerHTML = esc(w.name) + `<small>реакция ${p ? p.reaction : '?'} мс</small>`;
+    } else if (state.phase === 'judging') {
+      big.className = 'judging'; big.style.color = '';
+      big.innerHTML = 'Есть нажатие…';
+    } else if (state.phase === 'armed') {
+      big.className = 'armed'; big.style.color = '';
+      big.innerHTML = t >= state.armAt ? 'ЖМИТЕ!' : 'Внимание…';
+    } else {
+      big.style.color = '#555';
+      big.innerHTML = 'Ждём вопрос';
+    }
+
+    const order = state.presses.map((p, i) =>
+      `<div class="chip ${p.late ? 'late' : ''}" style="border-color:${team(p.teamId).color}">${i + 1}. ${esc(team(p.teamId).name)}<span>${i === 0 ? p.reaction + ' мс' : '+' + p.diff + ' мс'}</span></div>`
+    ).join('');
+    if ($('order').innerHTML !== order) $('order').innerHTML = order;
+
+    const teamsHtml = state.teams.map((tm) => {
+      const pen = state.penalties[tm.id];
+      const penTxt = pen && pen > t ? ` · <span class="pen">фальстарт ${Math.ceil((pen - t) / 1000)}с</span>` : '';
+      const exTxt = state.excluded.includes(tm.id) ? ' · уже отвечали' : '';
+      const on = state.online[tm.id] || 0;
+      return `<div class="team ${state.excluded.includes(tm.id) ? 'excluded' : ''}">
+        <div class="sw" style="background:${tm.color}"></div>
+        <div><div class="nm">${esc(tm.name)}</div><div class="meta">${on ? '📱 ' + on : '<span class="pen">нет подключений</span>'}${penTxt}${exTxt}</div></div>
+        <div class="sc">${tm.score}</div>
+        <div class="adj">${[-state.cost, -10, 10, state.cost].map((d) => `<button data-t="${tm.id}" data-d="${d}">${d > 0 ? '+' : ''}${d}</button>`).join('')}</div>
+      </div>`;
+    }).join('');
+    if ($('teams').innerHTML.replace(/\s+/g, '') !== teamsHtml.replace(/\s+/g, '')) {
+      $('teams').innerHTML = teamsHtml;
+      $('teams').querySelectorAll('button').forEach((b) => (b.onclick = () => send('score', { teamId: b.dataset.t, delta: +b.dataset.d })));
+    }
+
+    $('playUrl').textContent = location.origin + '/';
+    $('btnCorrect').disabled = $('btnWrong').disabled = state.phase !== 'answering';
+    $('btnCorrect').style.opacity = $('btnWrong').style.opacity = state.phase === 'answering' ? 1 : 0.4;
+
+    if (!cfgFilled) {
+      $('cfgTeams').value = state.teams.map((x) => x.name).join('\n');
+      $('cfgCost').value = state.cost;
+      $('cfgPen').value = String(state.penaltyMs);
+      cfgFilled = true;
+    }
+  }
+  setInterval(render, 100);
+</script>
+</body>
+</html>

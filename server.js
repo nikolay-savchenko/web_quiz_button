@@ -54,15 +54,15 @@ function makeGimmick(type) {
     // самый грустный — один из трёх самых грустных, остальные 5 — веселее него
     const top = 7 + Math.floor(Math.random() * 3);
     const others = shuffle(SAD_LADDER.slice(0, top)).slice(0, 5);
-    g.emojis = shuffle([SAD_LADDER[top], ...others]);
-    g.answer = g.emojis.indexOf(SAD_LADDER[top]);
+    g.emojis = [SAD_LADDER[top], ...others]; // порядок на экране каждый телефон перемешивает сам
+    g.answer = 0;
   }
   if (type === 'odd5' || type === 'odd10') {
     const pair = shuffle(pick(ODD_PAIRS));
     g.n = type === 'odd5' ? 5 : 10;
     g.base = pair[0];
     g.odd = pair[1];
-    g.idx = Math.floor(Math.random() * g.n * g.n);
+    // позицию лишнего каждый телефон выбирает сам — у всех она разная
   }
   if (type === 'bounce') {
     // угол не слишком близко к осям, чтобы кнопка не ездила строго вдоль стенки

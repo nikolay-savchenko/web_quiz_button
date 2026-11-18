@@ -192,7 +192,7 @@ async function waitFor(c, pred, timeout = 4000) {
     s = await freshArm(type);
     check(`«найди лишний» ${n}×${n}: пара 🙂/🙃 или 🐱/🐶`, () => {
       const g = s.gimmick;
-      assert.ok(g.type === type && g.n === n && g.idx < n * n);
+      assert.ok(g.type === type && g.n === n && g.idx === undefined);
       assert.ok([['🙂', '🙃'], ['🐱', '🐶']].some((p) => p.includes(g.base) && p.includes(g.odd) && g.base !== g.odd));
     });
   }

@@ -129,6 +129,7 @@
   }
   $('change').onclick = (e) => { e.preventDefault(); myTeam = null; localStorage.removeItem('quiz.team'); conn.send({ type: 'join', teamId: null }); render(); };
 
+  const shuffle = (arr) => { const a = [...arr]; for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
   const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   const ARROW = { up: '↑', down: '↓', left: '←', right: '→' };
   const WORD = { up: 'ВВЕРХ', down: 'ВНИЗ', left: 'ВЛЕВО', right: 'ВПРАВО' };
@@ -264,9 +265,12 @@
     const el = $('cap');
     cap = { key: roundKey(), lockUntil: 0 };
     if (g.type === 'sad') {
+      // свой порядок на каждом телефоне; data-i — индекс в исходном списке сервера
+      const order = shuffle(g.emojis.map((_, i) => i));
       el.innerHTML = `<div class="capTitle" id="capTitle">Выбери самый грустный смайлик</div>
-        <div class="sadGrid">${g.emojis.map((em, i) => `<button data-i="${i}">${em}</button>`).join('')}</div>`;
+        <div class="sadGrid">${order.map((i) => `<button data-i="${i}">${g.emojis[i]}</button>`).join('')}</div>`;
     } else {
+      cap.idx = Math.floor(Math.random() * g.n * g.n); // своя позиция лишнего на каждом телефоне
       el.innerHTML = `<div class="capTitle" id="capTitle">Найди лишний смайл</div><div class="oddWrap" id="oddWrap"><canvas id="oddCv"></canvas></div>`;
       requestAnimationFrame(drawOdd);
     }
@@ -288,7 +292,7 @@
     ctx.textBaseline = 'middle';
     for (let i = 0; i < g.n * g.n; i++) {
       const c = i % g.n, r = Math.floor(i / g.n);
-      ctx.fillText(i === g.idx ? g.odd : g.base, (c + 0.5) * cell, (r + 0.5) * cell + cell * 0.05);
+      ctx.fillText(i === cap.idx ? g.odd : g.base, (c + 0.5) * cell, (r + 0.5) * cell + cell * 0.05);
     }
   }
   window.addEventListener('resize', () => { if (state && state.gimmick && state.gimmick.type !== 'sad' && state.gimmick.type.startsWith('odd') && cap.key === roundKey()) drawOdd(); });
@@ -306,8 +310,8 @@
       if (e.target !== cv) return;
       const r = cv.getBoundingClientRect();
       const cell = r.width / g.n;
-      const cx = r.left + ((g.idx % g.n) + 0.5) * cell;
-      const cy = r.top + (Math.floor(g.idx / g.n) + 0.5) * cell;
+      const cx = r.left + ((cap.idx % g.n) + 0.5) * cell;
+      const cy = r.top + (Math.floor(cap.idx / g.n) + 0.5) * cell;
       ok = Math.hypot(e.clientX - cx, e.clientY - cy) <= Math.max(cell * 0.7, 18); // чуть больше половины клетки — с запасом на толщину пальца
     }
     if (ok) doPress(est);

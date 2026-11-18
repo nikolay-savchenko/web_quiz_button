@@ -20,6 +20,34 @@ const QRCode = require('qrcode');
 
 const PALETTE = ['#e74c3c', '#3498db', '#2ecc71', '#f39c12', '#9b59b6', '#1abc9c', '#e84393', '#7f8c8d'];
 
+// Приколы раунда. Выпадают всем командам одинаково (параметры генерирует сервер).
+const GIMMICKS = {
+  bounce: 'Бегающая кнопка',
+  swipe: 'Свайп',
+  swipe2: 'Двойной свайп',
+};
+const DIRS = ['up', 'down', 'left', 'right'];
+const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
+
+function makeGimmick(type) {
+  if (!GIMMICKS[type]) return null;
+  const g = { type };
+  if (type === 'swipe') g.dirs = [pick(DIRS)];
+  if (type === 'swipe2') {
+    const a = pick(DIRS);
+    g.dirs = [a, pick(a === 'up' || a === 'down' ? ['left', 'right'] : ['up', 'down'])];
+  }
+  if (type === 'bounce') {
+    // угол не слишком близко к осям, чтобы кнопка не ездила строго вдоль стенки
+    const quadrant = Math.floor(Math.random() * 4);
+    g.angle = (quadrant * 90 + 25 + Math.random() * 40) * Math.PI / 180;
+    g.speed = 0.9; // ширин экрана в секунду
+    g.x = 0.2 + Math.random() * 0.6; // стартовая позиция (доли экрана)
+    g.y = 0.2 + Math.random() * 0.6;
+  }
+  return g;
+}
+
 function createApp(opts = {}) {
   const cfg = {
     port: +(opts.port ?? process.env.PORT ?? 3000),
@@ -39,6 +67,8 @@ function createApp(opts = {}) {
     teams: ['Команда 1', 'Команда 2', 'Команда 3'].map((name, i) => ({ id: 't' + (i + 1), name, color: PALETTE[i], score: 0 })),
     cost: 100,
     penaltyMs: 2000,
+    gimmickChance: 0.1,                // вероятность прикола на раунд
+    gimmicks: Object.keys(GIMMICKS),   // какие приколы могут выпасть
   };
   try {
     if (opts.dataFile !== null && fs.existsSync(cfg.dataFile)) {
@@ -67,6 +97,10 @@ function createApp(opts = {}) {
     excluded: new Set(), // команды, которые уже ошиблись на этом вопросе
     judgeTimer: null,
     question: 1,
+    gimmick: null,       // прикол текущего открытия кнопок
+    nextGimmick: 'auto', // что выпадет при следующем открытии: auto | none | <тип>
+    oneMode: false,      // «кнопка у одного» на этом вопросе
+    holders: {},         // teamId -> id подключения, у которого кнопка
   };
   const penalties = new Map(); // teamId -> до какого серверного времени заблокирована
 
@@ -102,7 +136,47 @@ function createApp(opts = {}) {
       penaltyMs: saved.penaltyMs,
       online,
       hostsOnline: [...clients].filter((c) => c.role === 'host').length,
+      gimmick: round.gimmick,
+      nextGimmick: round.nextGimmick,
+      gimmickChance: saved.gimmickChance,
+      gimmicksEnabled: saved.gimmicks,
+      gimmickNames: GIMMICKS,
+      oneMode: round.oneMode,
+      holders: round.holders,
     };
+  }
+
+  // ---------- «кнопка у одного» ----------
+  function teamPlayers(teamId) {
+    return [...clients].filter((c) => c.role === 'player' && c.teamId === teamId && c.readyState === 1);
+  }
+  function pickHolders() {
+    round.holders = {};
+    for (const t of saved.teams) {
+      const ps = teamPlayers(t.id);
+      if (ps.length) round.holders[t.id] = pick(ps).id;
+    }
+  }
+  // если держатель кнопки отвалился/сменил команду — передаём другому телефону команды
+  function fixHolders() {
+    if (!round.oneMode) return;
+    for (const t of saved.teams) {
+      const ps = teamPlayers(t.id);
+      if (!ps.some((c) => c.id === round.holders[t.id])) {
+        if (ps.length) round.holders[t.id] = pick(ps).id;
+        else delete round.holders[t.id];
+      }
+    }
+  }
+
+  function rollGimmick() {
+    let type = round.nextGimmick;
+    round.nextGimmick = 'auto';
+    if (type === 'auto') {
+      const enabled = saved.gimmicks.filter((g) => GIMMICKS[g]);
+      type = enabled.length && Math.random() < saved.gimmickChance ? pick(enabled) : 'none';
+    }
+    return makeGimmick(type);
   }
 
   function broadcast() {
@@ -124,7 +198,9 @@ function createApp(opts = {}) {
     round.armAt = now() + cfg.armDelayMs;
     round.presses = [];
     round.winner = null;
-    log('кнопки открываются, вопрос', round.question);
+    round.gimmick = rollGimmick();
+    fixHolders();
+    log('кнопки открываются, вопрос', round.question, round.gimmick ? `(прикол: ${GIMMICKS[round.gimmick.type]})` : '');
     broadcast();
   }
 
@@ -134,7 +210,11 @@ function createApp(opts = {}) {
     round.presses = [];
     round.winner = null;
     round.armAt = 0;
-    if (newQuestion) { round.excluded.clear(); round.question++; penalties.clear(); }
+    round.gimmick = null;
+    if (newQuestion) {
+      round.excluded.clear(); round.question++; penalties.clear();
+      round.oneMode = false; round.holders = {};
+    }
     broadcast();
   }
 
@@ -160,6 +240,7 @@ function createApp(opts = {}) {
 
     if (round.phase !== 'armed' && round.phase !== 'judging' && round.phase !== 'answering') return;
     if (round.excluded.has(teamId)) return;
+    if (round.oneMode && round.holders[teamId] && round.holders[teamId] !== ws.id) return; // кнопка не у этого телефона
     if ((penalties.get(teamId) || 0) > est) return;
     if (est < round.armAt) est = round.armAt; // клиент думал, что уже можно — погрешность синхронизации
 
@@ -219,6 +300,16 @@ function createApp(opts = {}) {
         if (t && Number.isFinite(+m.delta)) { t.score += +m.delta; persist(); broadcast(); }
         break;
       }
+      case 'oneHolder': // случайный телефон в каждой команде; повторный клик — перевыбор
+        round.oneMode = true;
+        pickHolders();
+        log('кнопка у одного:', JSON.stringify(round.holders));
+        broadcast();
+        break;
+      case 'oneOff': round.oneMode = false; round.holders = {}; broadcast(); break;
+      case 'nextGimmick':
+        if (m.value === 'auto' || m.value === 'none' || GIMMICKS[m.value]) { round.nextGimmick = m.value; broadcast(); }
+        break;
       case 'resetScores': saved.teams.forEach((t) => (t.score = 0)); persist(); broadcast(); break;
       case 'config': {
         if (Array.isArray(m.teams)) {
@@ -232,6 +323,8 @@ function createApp(opts = {}) {
         }
         if (Number.isFinite(+m.cost)) saved.cost = Math.max(0, Math.round(+m.cost));
         if (Number.isFinite(+m.penaltyMs)) saved.penaltyMs = Math.max(0, Math.min(10000, Math.round(+m.penaltyMs)));
+        if (Number.isFinite(+m.gimmickChance)) saved.gimmickChance = Math.max(0, Math.min(1, +m.gimmickChance));
+        if (Array.isArray(m.gimmicks)) saved.gimmicks = m.gimmicks.filter((g) => GIMMICKS[g]);
         persist();
         resetRound(true);
         break;
@@ -275,7 +368,9 @@ function createApp(opts = {}) {
   const wss = new WebSocketServer({ server, path: '/ws' });
   wss.on('connection', (ws) => {
     ws.isAlive = true;
+    ws.id = crypto.randomBytes(4).toString('hex');
     clients.add(ws);
+    sendTo(ws, { type: 'you', id: ws.id });
     ws.on('pong', () => (ws.isAlive = true));
     ws.on('message', (raw) => {
       let m;
@@ -293,13 +388,13 @@ function createApp(opts = {}) {
         return broadcast();
       }
       if (ws.role === 'player') {
-        if (m.type === 'join') { ws.teamId = teamById(m.teamId) ? m.teamId : null; return broadcast(); }
+        if (m.type === 'join') { ws.teamId = teamById(m.teamId) ? m.teamId : null; fixHolders(); return broadcast(); }
         if (m.type === 'press') return onPress(ws, m);
         if (m.type === 'early') return onEarly(ws, m);
       }
       if (ws.role === 'host') return onHost(ws, m);
     });
-    ws.on('close', () => { clients.delete(ws); broadcast(); });
+    ws.on('close', () => { clients.delete(ws); fixHolders(); broadcast(); });
   });
 
   const heartbeat = setInterval(() => {

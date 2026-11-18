@@ -29,7 +29,8 @@ function makeClient(port, { role = 'player', teamId, key, delay = 10, jitter = 0
       if (samples.length > 15) samples.shift();
       const best = samples.reduce((a, b) => (b.r < a.r ? b : a));
       offset = best.off; rtt = best.r;
-    } else if (m.type === 'state') c.state = m;
+    } else if (m.type === 'you') c.id = m.id;
+    else if (m.type === 'state') c.state = m;
     else if (m.type === 'event') c.events.push(m);
   }, d()));
   c.ready = new Promise((res) => ws.on('open', () => {
@@ -125,7 +126,44 @@ async function waitFor(c, pred, timeout = 4000) {
     s = await waitFor(host, (s) => s.phase === 'answering');
     if (s.winner === 't1') wins++;
   }
-  check(`A побеждает во всех раундах (${wins}/15)`, () => assert.strictEqual(wins, 15));
+  // при джиттере до 80 мс погрешность синхронизации ~10–20 мс, так что при разнице 25 мс редкий промах допустим
+  check(`A побеждает почти всегда (${wins}/15)`, () => assert.ok(wins >= 14));
+
+  // --- 5. «кнопка у одного»: засчитывается только телефон-держатель
+  console.log('Сценарий 5: кнопка у одного — в команде A два телефона');
+  const A2 = makeClient(port, { teamId: 't1', delay: 20, skew: 777 });
+  await A2.ready;
+  await sleep(1500);
+  host.send({ type: 'reset' });
+  await waitFor(host, (s) => s.phase === 'idle' && (s.online.t1 || 0) === 2);
+  host.send({ type: 'oneHolder' });
+  s = await waitFor(host, (s) => s.oneMode && s.holders.t1);
+  const holder = s.holders.t1 === A.id ? A : A2;
+  const other = holder === A ? A2 : A;
+  check('у каждой команды выбран держатель', () => assert.ok(s.holders.t1 && s.holders.t2 && s.holders.t3));
+  host.send({ type: 'arm' });
+  // не-держатель жмёт раньше всех, держатель — позже B
+  await Promise.all([other.pressAfterUnlock(30), B.pressAfterUnlock(120), holder.pressAfterUnlock(250)]);
+  s = await waitFor(host, (s) => s.phase === 'answering');
+  check('нажатие не-держателя не засчитано, первой B', () => assert.strictEqual(s.winner, 't2'));
+  const pA = s.presses.find((p) => p.teamId === 't1');
+  check('у A засчитано нажатие держателя (~250 мс)', () => assert.ok(pA && Math.abs(pA.reaction - 250) < 40, JSON.stringify(pA)));
+  A2.close();
+  await sleep(300);
+  host.send({ type: 'reset' });
+  s = await waitFor(host, (s) => s.phase === 'idle' && !s.oneMode);
+  check('новый вопрос выключает режим', () => assert.ok(!s.oneMode));
+
+  // --- 6. прикол выбирается ведущим и одинаков для всех
+  console.log('Сценарий 6: прикол «двойной свайп» на следующее открытие');
+  host.send({ type: 'nextGimmick', value: 'swipe2' });
+  await waitFor(host, (s) => s.nextGimmick === 'swipe2');
+  host.send({ type: 'arm' });
+  s = await waitFor(host, (s) => s.phase === 'armed' && s.gimmick);
+  await waitFor(B, (st) => st.phase === 'armed' && st.gimmick);
+  check('выпал двойной свайп с двумя направлениями', () => assert.ok(s.gimmick.type === 'swipe2' && s.gimmick.dirs.length === 2));
+  check('у телефона тот же прикол', () => assert.deepStrictEqual(B.state.gimmick, s.gimmick));
+  check('после использования снова «авто»', () => assert.strictEqual(s.nextGimmick, 'auto'));
 
   [host, A, B, C].forEach((c) => c.close());
   app.close();

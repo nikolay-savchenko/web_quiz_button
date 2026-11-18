@@ -53,6 +53,14 @@
   .row { display: flex; gap: 10px; } .row > * { flex: 1; }
   details summary { cursor: pointer; color: #999; }
   #sound { position: fixed; top: 12px; right: 400px; }
+  #fun { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  #fun select { width: auto; margin-left: 8px; }
+  label.inline { display: inline-flex; align-items: center; font-size: 15px; margin: 0; }
+  #btnOne.on { background: #8e44ad; }
+  #gTag { background: #8e44ad; color: #fff; padding: 4px 10px; border-radius: 8px; font-size: 16px; }
+  .checks { display: flex; flex-direction: column; gap: 4px; }
+  .checks label { display: flex; gap: 8px; align-items: center; color: #ddd; font-size: 14px; margin: 0; }
+  .checks input { width: auto; }
 </style>
 </head>
 <body>
@@ -63,7 +71,7 @@
 
 <div id="app" class="hidden">
   <div id="stage">
-    <div id="status"><span id="phaseTxt"></span><span class="q" id="qTxt"></span></div>
+    <div id="status"><span id="phaseTxt"></span><span class="q" id="qTxt"></span><span id="gTag" class="hidden"></span></div>
     <div id="big">—</div>
     <div id="order"></div>
     <div id="controls">
@@ -71,6 +79,13 @@
       <button id="btnCorrect">Верно<kbd>Enter</kbd></button>
       <button id="btnWrong">Неверно<kbd>Backspace</kbd></button>
       <button id="btnReset">Новый вопрос / сброс<kbd>Esc</kbd></button>
+    </div>
+    <div id="fun">
+      <button id="btnOne">🎯 Кнопка у одного<kbd>O</kbd></button>
+      <button id="btnOneOff" class="hidden">выкл</button>
+      <label class="inline">Прикол на следующее открытие:
+        <select id="nextG"></select>
+      </label>
     </div>
   </div>
 
@@ -93,6 +108,10 @@
             <select id="cfgPen"><option value="0">выкл</option><option value="1000">1 с</option><option value="2000">2 с</option><option value="3000">3 с</option><option value="5000">5 с</option></select>
           </div>
         </div>
+        <div><label>Вероятность прикола на открытие кнопок</label>
+          <select id="cfgChance"><option value="0">никогда</option><option value="0.1">10%</option><option value="0.2">20%</option><option value="0.3">30%</option><option value="0.5">50%</option><option value="1">всегда</option></select>
+        </div>
+        <div><label>Какие приколы могут выпасть</label><div id="cfgGimmicks" class="checks"></div></div>
         <button id="cfgSave">Сохранить</button>
         <button id="resetScores" style="background:#4a1f1f">Обнулить счёт</button>
       </div>
@@ -160,9 +179,18 @@
   $('btnReset').onclick = () => send('reset');
   $('resetScores').onclick = () => { if (confirm('Обнулить счёт всех команд?')) send('resetScores'); };
   $('cfgSave').onclick = () => {
-    send('config', { teams: $('cfgTeams').value.split('\n'), cost: $('cfgCost').value, penaltyMs: $('cfgPen').value });
+    send('config', {
+      teams: $('cfgTeams').value.split('\n'), cost: $('cfgCost').value, penaltyMs: $('cfgPen').value,
+      gimmickChance: $('cfgChance').value,
+      gimmicks: [...document.querySelectorAll('#cfgGimmicks input:checked')].map((i) => i.value),
+    });
     cfgFilled = false;
   };
+  $('btnOne').onclick = () => send('oneHolder');
+  $('btnOneOff').onclick = () => send('oneOff');
+  $('nextG').onchange = () => send('nextGimmick', { value: $('nextG').value });
+  const ARROW = { up: '↑', down: '↓', left: '←', right: '→' };
+  const gimmickLabel = (g, names) => names[g.type] + (g.dirs ? ' ' + g.dirs.map((d) => ARROW[d]).join(' ') : '');
   $('qrImg').onclick = () => $('qrFull').classList.remove('hidden');
   $('qrFull').onclick = () => $('qrFull').classList.add('hidden');
 
@@ -173,6 +201,7 @@
     else if (e.key === 'Backspace') { e.preventDefault(); send('wrong'); }
     else if (e.key === 'Escape') { $('qrFull').classList.add('hidden'); send('reset'); }
     else if (e.key === 'q' || e.key === 'й') $('qrFull').classList.toggle('hidden');
+    else if (e.key === 'o' || e.key === 'щ') send('oneHolder');
   });
 
   // ---------- отрисовка ----------
@@ -212,7 +241,7 @@
     const teamsHtml = state.teams.map((tm) => {
       const pen = state.penalties[tm.id];
       const penTxt = pen && pen > t ? ` · <span class="pen">фальстарт ${Math.ceil((pen - t) / 1000)}с</span>` : '';
-      const exTxt = state.excluded.includes(tm.id) ? ' · уже отвечали' : '';
+      const exTxt = (state.excluded.includes(tm.id) ? ' · уже отвечали' : '') + (state.oneMode && state.holders[tm.id] ? ' · 🎯 кнопка у одного' : '');
       const on = state.online[tm.id] || 0;
       return `<div class="team ${state.excluded.includes(tm.id) ? 'excluded' : ''}">
         <div class="sw" style="background:${tm.color}"></div>
@@ -230,10 +259,26 @@
     $('btnCorrect').disabled = $('btnWrong').disabled = state.phase !== 'answering';
     $('btnCorrect').style.opacity = $('btnWrong').style.opacity = state.phase === 'answering' ? 1 : 0.4;
 
+    // приколы
+    const names = state.gimmickNames;
+    const gTag = $('gTag');
+    gTag.classList.toggle('hidden', !state.gimmick);
+    if (state.gimmick) gTag.textContent = '🎲 ' + gimmickLabel(state.gimmick, names);
+    $('btnOne').classList.toggle('on', state.oneMode);
+    $('btnOne').firstChild.textContent = state.oneMode ? '🎯 У одного: перевыбрать' : '🎯 Кнопка у одного';
+    $('btnOneOff').classList.toggle('hidden', !state.oneMode);
+    const opts = [['auto', 'случайно (по вероятности)'], ['none', 'без прикола'], ...Object.entries(names)];
+    const optHtml = opts.map(([v, n]) => `<option value="${v}">${esc(n)}</option>`).join('');
+    if ($('nextG').dataset.h !== optHtml) { $('nextG').innerHTML = optHtml; $('nextG').dataset.h = optHtml; }
+    if (document.activeElement !== $('nextG')) $('nextG').value = state.nextGimmick;
+
     if (!cfgFilled) {
       $('cfgTeams').value = state.teams.map((x) => x.name).join('\n');
       $('cfgCost').value = state.cost;
       $('cfgPen').value = String(state.penaltyMs);
+      $('cfgChance').value = String(state.gimmickChance);
+      $('cfgGimmicks').innerHTML = Object.entries(names).map(([v, n]) =>
+        `<label><input type="checkbox" value="${v}" ${state.gimmicksEnabled.includes(v) ? 'checked' : ''}>${esc(n)}</label>`).join('');
       cfgFilled = true;
     }
   }
